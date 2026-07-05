@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="512" height="512">
+    <!-- 背景阴影 (可选，增加层级感) -->
+    <defs>
+        <filter id="shadow" x="0" y="0" width="200%" height="200%">
+            <feOffset result="offOut" in="SourceAlpha" dx="1" dy="1" />
+            <feGaussianBlur result="blurOut" in="offOut" stdDeviation="1" />
+            <feBlend in="SourceGraphic" in2="blurOut" mode="normal" />
+        </filter>
+    </defs>
+    
+    <!-- 谷歌风格圆角矩形背景 (可选，去掉则为透明背景) -->
+    <!-- <rect x="0" y="0" width="48" height="48" rx="8" fill="#ffffff" filter="url(#shadow)"/> -->
+
+    <!-- 主体图形：一个构成了'Q'字的打开的文档/处理容器 -->
+    <g transform="translate(6, 6)">
+        
+        <!-- 左侧蓝色部分: 代表核心与转换 (Word-PDF) -->
+        <path d="M 4 0 A 4 4 0 0 0 0 4 L 0 24 L 8 24 L 8 8 L 24 8 L 24 0 Z" fill="#4285F4"/>
+        
+        <!-- 右上角红色部分: 代表页面操作与拆分 -->
+        <path d="M 28 0 L 28 8 L 36 8 A 4 4 0 0 0 32 0 Z" fill="#EA4335"/>
+        <path d="M 36 12 L 28 12 L 28 20 L 36 20 Z" fill="#EA4335" opacity="0.8"/>
+        
+        <!-- 底部绿色部分: 代表安全与压缩 -->
+        <path d="M 0 28 L 0 32 A 4 4 0 0 0 4 36 L 24 36 L 24 28 Z" fill="#34A853"/>
+        
+        <!-- Q字的“尾巴”：黄色部分，代表工具、附件与高级功能 -->
+        <path d="M 28 24 L 28 36 L 36 36 L 36 24 Z" fill="#FBBC05"/>
+        <path d="M 32 36 L 28 40 L 32 44 L 36 40 Z" fill="#FBBC05" filter="url(#shadow)"/>
+
+    </g>
+    
+</svg>
