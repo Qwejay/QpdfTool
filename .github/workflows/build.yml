@@ -1,0 +1,154 @@
+name: Build and Release QpdfTool
+
+on:
+  push:
+    tags:
+      - 'v*'
+      - 'v*.*'
+      - 'v*.*.*'
+      - 'v*.*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: '手动构建版本号 (例如: 1.0.2)'
+        required: true
+        default: '1.0.2'
+
+jobs:
+  build:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install --upgrade setuptools wheel
+          pip install PySide6 pymupdf pdf2docx docx2pdf
+          pip install nuitka ordered-set zstandard
+
+      - name: Resolve Version
+        id: version
+        shell: bash
+        run: |
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            ORIGINAL_VER="${{ github.ref_name }}"
+          elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            ORIGINAL_VER="${{ github.event.inputs.version }}"
+          else
+            ORIGINAL_VER="1.0.2-dev"
+          fi
+          
+          CLEAN_VER=$(echo "$ORIGINAL_VER" | sed -E 's/^[vV]//g')
+          
+          METADATA_VER=$(echo "$CLEAN_VER" | cut -d'-' -f1)
+          if [[ ! "$METADATA_VER" =~ ^[0-9]+(\.[0-9]+)*$ ]]; then
+            METADATA_VER="1.0.2"
+          fi
+          
+          echo "clean_version=$CLEAN_VER" >> $GITHUB_OUTPUT
+          echo "metadata_version=$METADATA_VER" >> $GITHUB_OUTPUT
+
+      - name: Sync Version to Code
+        shell: python
+        run: |
+          import re
+          import os
+
+          version = "${{ steps.version.outputs.clean_version }}"
+          print(f"Target version to sync: {version}")
+
+          filename = "QpdfTool.py"
+          if os.path.exists(filename):
+              with open(filename, 'r', encoding='utf-8') as f:
+                  content = f.read()
+              
+              # 匹配并替换 __version__ = "x.y.z"
+              new_content = re.sub(
+                  r'(__version__\s*=\s*["\'])[^"\']+(["\'])',
+                  f'\\g<1>{version}\\g<2>',
+                  content,
+                  count=1
+              )
+              with open(filename, 'w', encoding='utf-8') as f:
+                  f.write(new_content)
+              print(f"Successfully synchronized version in {filename}.")
+
+      - name: Build with Nuitka
+        run: |
+          $version = "${{ steps.version.outputs.clean_version }}"
+          $metadataVersion = "${{ steps.version.outputs.metadata_version }}"
+          
+          $nuitkaParams = @(
+            "-m", "nuitka",
+            "--standalone",
+            "--onefile",
+            "--windows-console-mode=disable",
+            "--enable-plugin=pyside6",
+            "--include-package=PySide6",
+            "--include-package=fitz",
+            "--nofollow-import-to=tkinter",
+            "--remove-output",
+            "--jobs=1",
+            "--lto=yes",
+            "--assume-yes-for-downloads",
+            "--product-name=QpdfTool",
+            "--product-version=$metadataVersion",
+            "--file-description=极简风格的PDF处理工具",
+            "--copyright=QwejayHuang",
+            "--output-dir=dist"
+          )
+          
+          # 自适应检测数据文件 logo.svg
+          if (Test-Path "logo.svg") {
+            $nuitkaParams += "--include-data-files=logo.svg=logo.svg"
+          }
+          
+          # 自适应检测应用程序图标文件 icon.ico
+          if (Test-Path "icon.ico") {
+            $nuitkaParams += "--windows-icon-from-ico=icon.ico"
+          }
+          
+          $nuitkaParams += "QpdfTool.py"
+          
+          python @nuitkaParams
+          
+          if (Test-Path "dist/QpdfTool.exe") {
+            Rename-Item -Path "dist/QpdfTool.exe" -NewName "QpdfTool_$version.exe"
+            Write-Host "成功生成：dist/QpdfTool_$version.exe"
+            
+            # 将生成的 exe 压缩为 zip 发行包
+            Compress-Archive -Path "dist/QpdfTool_$version.exe" -DestinationPath "dist/QpdfTool_$version.zip"
+            Write-Host "成功生成：dist/QpdfTool_$version.zip"
+          } else {
+            Write-Error "编译失败：未能在 dist 目录下找到生成的 QpdfTool.exe 文件"
+            exit 1
+          }
+        shell: pwsh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: QpdfTool_build
+          path: dist/QpdfTool_*.zip
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/QpdfTool_*.zip
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
