@@ -1,49 +1,32 @@
 import os
 import sys
 import json
+import fitz
 
-import fitz  # PyMuPDF
 from PySide6.QtWidgets import (QApplication, QMainWindow, QPushButton, QVBoxLayout,
                                QWidget, QLabel, QComboBox, QHBoxLayout, QFrame, 
                                QFileDialog, QLineEdit, QListWidget, QTableWidget, 
                                QTableWidgetItem, QHeaderView, QMenu, QAbstractItemView, 
                                QStackedWidget, QProgressBar)
 from PySide6.QtCore import Qt, QThread, Signal
-from PySide6.QtGui import QDragEnterEvent, QDropEvent, QFont, QColor
-
-# 尝试导入高级转换库
-try:
-    from pdf2docx import Converter
-    HAS_PDF2DOCX = True
-except ImportError:
-    HAS_PDF2DOCX = False
-
-try:
-    from docx2pdf import convert as docx2pdf_convert
-    HAS_DOCX2PDF = True
-except ImportError:
-    HAS_DOCX2PDF = False
+from PySide6.QtGui import QDragEnterEvent, QDropEvent, QFont, QColor, QIcon, QPixmap
 
 __app_name__ = "QpdfTool"
-__version__ = "1.2.0"
+__version__ = "1.0.2"
 __author__ = "QwejayHuang"
 __description__ = "极简风格的PDF处理工具"
 
-# 全局 QSS 现代化样式表（ Obsidian 深色极简风 ）
 GLOBAL_QSS = """
-    /* 主窗口 */
     QMainWindow {
         background-color: #0f172a;
     }
     
-    /* 统一文本样式 */
     QLabel {
         color: #94a3b8;
         font-size: 13px;
         font-weight: 500;
     }
 
-    /* 侧边导航栏面板 */
     QListWidget#SidebarNav {
         background-color: #090d16;
         border: none;
@@ -67,7 +50,6 @@ GLOBAL_QSS = """
         color: #ffffff;
     }
 
-    /* 数据表格 */
     QTableWidget {
         border: 1px solid #1e293b;
         border-radius: 10px;
@@ -94,7 +76,6 @@ GLOBAL_QSS = """
         font-weight: bold;
     }
 
-    /* 现代输入框与下拉选择框 */
     QComboBox, QLineEdit {
         border: 1px solid #1e293b;
         border-radius: 8px;
@@ -123,7 +104,6 @@ GLOBAL_QSS = """
         padding: 4px;
     }
 
-    /* 现代扁平按钮 */
     QPushButton {
         border-radius: 8px;
         font-size: 13px;
@@ -153,7 +133,6 @@ GLOBAL_QSS = """
         background-color: #b91c1c;
     }
 
-    /* 滚动条美化 */
     QScrollBar:vertical {
         border: none;
         background: #0f172a;
@@ -386,7 +365,6 @@ class TaskWorkspace(QWidget):
         self.drop_area.files_dropped.connect(self.table.add_files)
         layout.addWidget(self.table)
 
-        # 实时任务进度条
         self.progress_bar = QProgressBar()
         self.progress_bar.setFixedHeight(6)
         self.progress_bar.setTextVisible(False)
@@ -467,7 +445,9 @@ class ConvertWorker(QThread):
                 if self.task_id == "pdf_word":
                     ext = os.path.splitext(f)[1].lower()
                     if ext == '.pdf':
-                        if not HAS_PDF2DOCX: 
+                        try:
+                            from pdf2docx import Converter
+                        except ImportError:
                             raise ImportError("需安装 pdf2docx 库")
                         out = os.path.join(self._get_out_dir(f), f"{os.path.splitext(os.path.basename(f))[0]}.docx")
                         cv = Converter(f)
@@ -475,7 +455,9 @@ class ConvertWorker(QThread):
                         cv.close()
                         self.progress.emit(f, "转为 Word 成功", False)
                     elif ext == '.docx':
-                        if not HAS_DOCX2PDF: 
+                        try:
+                            from docx2pdf import convert as docx2pdf_convert
+                        except ImportError:
                             raise ImportError("需安装 docx2pdf 库 (且依赖本地Office)")
                         out = os.path.join(self._get_out_dir(f), f"{os.path.splitext(os.path.basename(f))[0]}.pdf")
                         docx2pdf_convert(f, out)
@@ -506,7 +488,6 @@ class ConvertWorker(QThread):
             except Exception as e:
                 self.progress.emit(f, f"失败 ({str(e)})", True)
 
-        # 批量处理逻辑
         if self._is_running and self.files:
             if self.task_id == "img2pdf":
                 if self.settings.get("img_pdf_mode") == "合并":
@@ -756,20 +737,23 @@ class ConvertWorker(QThread):
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle(f"{__app_name__} —— 极简外观 · 全能内核")
+        self.setWindowTitle(f"{__app_name__} —— 极简风格的PDF处理工具")
         self.active_workspace = None
         self.processed_count = 0
         self.init_ui()
 
     def init_ui(self):
         self.resize(1100, 760)
+        
+        if os.path.exists("logo.svg"):
+            self.setWindowIcon(QIcon("logo.svg"))
+            
         central = QWidget()
         self.setCentralWidget(central)
         layout = QHBoxLayout(central)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
 
-        # 侧边栏整体容器面板
         sidebar_panel = QWidget()
         sidebar_panel.setObjectName("SidebarPanel")
         sidebar_panel.setFixedWidth(240)
@@ -784,23 +768,37 @@ class MainWindow(QMainWindow):
         sidebar_layout.setContentsMargins(0, 0, 0, 0)
         sidebar_layout.setSpacing(0)
 
-        # 侧边栏顶部品牌信息区
         brand_container = QWidget()
-        brand_container.setStyleSheet("padding: 24px 16px 16px 20px; background-color: #090d16;")
-        brand_layout = QVBoxLayout(brand_container)
-        brand_layout.setContentsMargins(0, 0, 0, 0)
-        brand_layout.setSpacing(4)
+        brand_container.setStyleSheet("background-color: #090d16;")
+        brand_layout = QHBoxLayout(brand_container)
+        brand_layout.setContentsMargins(20, 24, 16, 16)
+        brand_layout.setSpacing(12)
 
-        logo_label = QLabel("⚡ QpdfTool")
-        logo_label.setStyleSheet("color: #ffffff; font-size: 20px; font-weight: 800; letter-spacing: 0.5px;")
+        logo_img_label = QLabel()
+        logo_img_label.setFixedSize(32, 32)
+        if os.path.exists("logo.svg"):
+            logo_img_label.setPixmap(QIcon("logo.svg").pixmap(32, 32))
+        else:
+            logo_img_label.setText("⚡")
+            logo_img_label.setStyleSheet("font-size: 24px; color: #3b82f6; background: transparent; border: none;")
+
+        text_container = QWidget()
+        text_layout = QVBoxLayout(text_container)
+        text_layout.setContentsMargins(0, 0, 0, 0)
+        text_layout.setSpacing(2)
+
+        logo_label = QLabel("QpdfTool")
+        logo_label.setStyleSheet("color: #ffffff; font-size: 18px; font-weight: 800; letter-spacing: 0.5px;")
         brand_sub = QLabel("极简外观 · 全能内核")
         brand_sub.setStyleSheet("color: #64748b; font-size: 11px; font-weight: 500;")
 
-        brand_layout.addWidget(logo_label)
-        brand_layout.addWidget(brand_sub)
+        text_layout.addWidget(logo_label)
+        text_layout.addWidget(brand_sub)
+
+        brand_layout.addWidget(logo_img_label)
+        brand_layout.addWidget(text_container)
         sidebar_layout.addWidget(brand_container)
 
-        # 侧边栏导航条
         self.nav = QListWidget()
         self.nav.setObjectName("SidebarNav")
         self.nav.addItems([
@@ -817,7 +815,6 @@ class MainWindow(QMainWindow):
         ])
         sidebar_layout.addWidget(self.nav)
 
-        # 侧边栏底部版本标识
         version_label = QLabel(f"Version {__version__}")
         version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         version_label.setStyleSheet("color: #334155; font-size: 11px; font-weight: bold; padding: 16px; border-top: 1px solid #131b2e;")
@@ -825,17 +822,14 @@ class MainWindow(QMainWindow):
 
         layout.addWidget(sidebar_panel)
 
-        # 右侧内容堆叠窗口
         self.stack = QStackedWidget()
         self.stack.setStyleSheet("QStackedWidget { background-color: #0f172a; }")
 
-        # 0. PDF & Word 互转
         self.ws_word = TaskWorkspace("pdf_word", "Word 与 PDF 双向转换", ['.pdf', '.docx'])
         self.ws_word.add_control(QLabel("说明: 丢入 PDF 则转出 Word；丢入 Word 则转出 PDF。"))
         self._add_action_btn(self.ws_word)
         self.stack.addWidget(self.ws_word)
 
-        # 1. PDF2IMG
         self.ws_p2i = TaskWorkspace("pdf2img", "将 PDF 拆分为单页高清图片", ['.pdf'])
         self.cb_dpi = QComboBox()
         self.cb_dpi.addItems(["72 DPI", "150 DPI (推荐)", "300 DPI", "600 DPI"])
@@ -849,7 +843,6 @@ class MainWindow(QMainWindow):
         self._add_action_btn(self.ws_p2i)
         self.stack.addWidget(self.ws_p2i)
 
-        # 2. IMG2PDF
         self.ws_i2p = TaskWorkspace("img2pdf", "将图片转换为 PDF 文档", ['.jpg', '.jpeg', '.png', '.webp', '.bmp'], is_sortable=True)
         self.cb_mode = QComboBox()
         self.cb_mode.addItems(["合并为一个 PDF", "分别转为独立 PDF"])
@@ -858,13 +851,11 @@ class MainWindow(QMainWindow):
         self._add_action_btn(self.ws_i2p)
         self.stack.addWidget(self.ws_i2p)
 
-        # 3. PDF Merge
         self.ws_merge = TaskWorkspace("pdf_merge", "将多个 PDF 合并为一个", ['.pdf'], is_sortable=True)
         self.ws_merge.add_control(QLabel("说明: 列表从上到下的顺序即为合并后的页码顺序"))
         self._add_action_btn(self.ws_merge)
         self.stack.addWidget(self.ws_merge)
 
-        # 4. PDF Split/Delete
         self.ws_split = TaskWorkspace("pdf_split", "提取保留 / 或安全删除指定页码", ['.pdf'])
         self.cb_split = QComboBox()
         self.cb_split.addItems(["保留选中页码", "删除选中页码"])
@@ -876,13 +867,11 @@ class MainWindow(QMainWindow):
         self._add_action_btn(self.ws_split)
         self.stack.addWidget(self.ws_split)
 
-        # 5. PDF Compress
         self.ws_comp = TaskWorkspace("pdf_compress", "优化并减小 PDF 文件体积", ['.pdf'])
         self.ws_comp.add_control(QLabel("说明: 使用底层深层清理算法，不影响视觉清晰度与排版"))
         self._add_action_btn(self.ws_comp)
         self.stack.addWidget(self.ws_comp)
 
-        # 6. PDF Extract
         self.ws_ext = TaskWorkspace("pdf_extract", "解剖 PDF，提取内部元素到文件夹", ['.pdf'])
         self.cb_ext = QComboBox()
         self.cb_ext.addItems(["提取纯文本 (.txt)", "提取所有图片 (.png)", "提取表格数据 (.json)", "提取矢量图形 (.json)"])
@@ -891,7 +880,6 @@ class MainWindow(QMainWindow):
         self._add_action_btn(self.ws_ext)
         self.stack.addWidget(self.ws_ext)
 
-        # 7. PDF Security
         self.ws_sec = TaskWorkspace("pdf_security", "PDF 密码管理与内容永久物理打码", ['.pdf'])
         self.cb_sec = QComboBox()
         self.cb_sec.addItems(["🔒 添加密码加密", "🔓 验证并解除密码", "⬛ 物理擦除(打黑)敏感文字"])
@@ -903,7 +891,6 @@ class MainWindow(QMainWindow):
         self._add_action_btn(self.ws_sec)
         self.stack.addWidget(self.ws_sec)
 
-        # 8. PDF Edit
         self.ws_edit = TaskWorkspace("pdf_edit", "PDF 页面排版、重构与内容追加", ['.pdf'])
         self.cb_edit = QComboBox()
         self.cb_edit.addItems([
@@ -923,7 +910,6 @@ class MainWindow(QMainWindow):
         self._add_action_btn(self.ws_edit)
         self.stack.addWidget(self.ws_edit)
 
-        # 9. PDF Attachments
         self.ws_attach = TaskWorkspace("pdf_attach", "向 PDF 注入/挂载外部文件", ['.pdf'])
         self.cb_attach = QComboBox()
         self.cb_attach.addItems(["📌 以页面图钉形式附加", "📦 作为隐藏文档彻底嵌入"])
@@ -935,7 +921,6 @@ class MainWindow(QMainWindow):
         self._add_action_btn(self.ws_attach)
         self.stack.addWidget(self.ws_attach)
 
-        # 统一输出路径面板
         bottom_bar = QWidget()
         bottom_bar.setObjectName("BottomBar")
         bottom_bar.setStyleSheet("""
@@ -1040,7 +1025,6 @@ class MainWindow(QMainWindow):
             btn.style().unpolish(btn)
             btn.style().polish(btn)
             
-            # 初始化并配置进度条
             ws.progress_bar.setRange(0, len(files))
             ws.progress_bar.setValue(0)
             ws.progress_bar.setVisible(True)
@@ -1081,10 +1065,8 @@ if __name__ == '__main__':
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
     
-    # 注入全局 QSS 现代化样式
     app.setStyleSheet(GLOBAL_QSS)
     
-    # 根据系统自适应选择渲染性能优秀的无衬线UI字体
     if sys.platform == "darwin":
         font = QFont("SF Pro Text", 13)
     elif sys.platform == "win32":
