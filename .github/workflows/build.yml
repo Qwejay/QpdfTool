@@ -65,30 +65,51 @@ jobs:
         run: |
           import re
           import os
+          import glob
 
           version = "${{ steps.version.outputs.clean_version }}"
           print(f"Target version to sync: {version}")
 
-          filename = "QpdfTool.py"
-          if os.path.exists(filename):
+          # 自动获取当前目录下的 Python 主文件
+          py_files = glob.glob("*.py")
+          for filename in py_files:
               with open(filename, 'r', encoding='utf-8') as f:
                   content = f.read()
               
-              # 匹配并替换 __version__ = "x.y.z"
-              new_content = re.sub(
-                  r'(__version__\s*=\s*["\'])[^"\']+(["\'])',
-                  f'\\g<1>{version}\\g<2>',
-                  content,
-                  count=1
-              )
-              with open(filename, 'w', encoding='utf-8') as f:
-                  f.write(new_content)
-              print(f"Successfully synchronized version in {filename}.")
+              if '__version__' in content:
+                  # 匹配并替换 __version__ = "x.y.z"
+                  new_content = re.sub(
+                      r'(__version__\s*=\s*["\'])[^"\']+(["\'])',
+                      f'\\g<1>{version}\\g<2>',
+                      content,
+                      count=1
+                  )
+                  with open(filename, 'w', encoding='utf-8') as f:
+                      f.write(new_content)
+                  print(f"Successfully synchronized version in {filename}.")
+                  
+                  # 记录找到的文件名，供后续 Nuitka 编译使用
+                  with open(os.environ['GITHUB_ENV'], 'a', encoding='utf-8') as env_file:
+                      env_file.write(f"PY_FILENAME={filename}\n")
+                  break
+          else:
+              print("Warning: No Python file with __version__ found.")
 
       - name: Build with Nuitka
         run: |
           $version = "${{ steps.version.outputs.clean_version }}"
           $metadataVersion = "${{ steps.version.outputs.metadata_version }}"
+          $pyFile = $env:PY_FILENAME
+          
+          # 作为 fallback，如果上面的脚本没有找到文件，则默认取当前目录的第一个 python 文件
+          if (-not $pyFile) {
+            $pyFile = (Get-ChildItem -Filter *.py | Select-Object -First 1).Name
+          }
+          
+          if (-not $pyFile) {
+            Write-Error "编译失败：未找到可用的 Python 源文件"
+            exit 1
+          }
           
           $nuitkaParams = @(
             "-m", "nuitka",
@@ -120,19 +141,22 @@ jobs:
             $nuitkaParams += "--windows-icon-from-ico=icon.ico"
           }
           
-          $nuitkaParams += "QpdfTool.py"
+          $nuitkaParams += $pyFile
           
           python @nuitkaParams
           
-          if (Test-Path "dist/QpdfTool.exe") {
-            Rename-Item -Path "dist/QpdfTool.exe" -NewName "QpdfTool_$version.exe"
+          # 动态匹配生成的 exe (不论原文件叫什么，Nuitka 编译出的 exe 我们提取第一个)
+          $exeFile = Get-ChildItem -Path dist -Filter *.exe | Select-Object -First 1
+          
+          if ($exeFile) {
+            Rename-Item -Path $exeFile.FullName -NewName "QpdfTool_$version.exe"
             Write-Host "成功生成：dist/QpdfTool_$version.exe"
             
             # 将生成的 exe 压缩为 zip 发行包
             Compress-Archive -Path "dist/QpdfTool_$version.exe" -DestinationPath "dist/QpdfTool_$version.zip"
             Write-Host "成功生成：dist/QpdfTool_$version.zip"
           } else {
-            Write-Error "编译失败：未能在 dist 目录下找到生成的 QpdfTool.exe 文件"
+            Write-Error "编译失败：未能在 dist 目录下找到生成的 exe 文件"
             exit 1
           }
         shell: pwsh
